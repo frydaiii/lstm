@@ -8,13 +8,6 @@ from torch.utils.data import DataLoader
 from torch import nn
 from typing import List
 
-tickers = ["SPY", "AAPL"]
-stock_data = yf.download(" ".join(tickers), period="5y")
-n_tickers = len(tickers)
-
-device = 'mps:0' if torch.backends.mps.is_available(
-) else 'cuda' if torch.cuda.is_available() else 'cpu'
-
 
 class TimeSeriesDataset(Dataset):
 
@@ -29,58 +22,10 @@ class TimeSeriesDataset(Dataset):
     return self.X[i], self.Y[i]
 
 
-def prepare_data(df: pd.DataFrame, shift: int, scale: float):
-  df.dropna(inplace=True)
-  close_prices = stock_data["Close"].to_numpy()
-  returns = (close_prices[1:] - close_prices[:-1]) / close_prices[:-1]
-  returns = np.append(np.zeros((1, returns.shape[1])), returns, axis=0)
-  n_tickers = returns.shape[1]
-  n_steps = returns.shape[0] - shift + 1
-  # shifted_returns = np.zeros((n_tickers, n_steps, shift))
-  # for i in range(0, n_tickers):
-  #   for j in range(0, n_steps):
-  #     shifted_returns[i][j] = returns.T[i][j:j + shift]
-
-  shifted_returns = np.zeros((n_steps, shift, n_tickers))
-  for i in range(0, n_steps):
-    shifted_returns[i] = returns[i:i + shift, :]
-  shifted_returns = np.float32(shifted_returns)
-
-  X = shifted_returns[:, :-1, :]
-  Y = shifted_returns[:, -1, :]
-  split_index = int(n_steps * scale)
-  X_train = X[:split_index]
-  X_test = X[split_index:]
-
-  Y_train = Y[:split_index]
-  Y_test = Y[split_index:]
-
-  # X_train = np.expand_dims(X_train, axis=3)
-  # X_test = np.expand_dims(X_test, axis=3)
-
-  # Y_train = np.expand_dims(Y_train, axis=2)
-  # Y_test = np.expand_dims(Y_test, axis=2)
-
-  print(X_train.shape, X_test.shape, Y_train.shape, Y_test.shape)
-  return X_train, X_test, Y_train, Y_test
-
-
-lookback = 14
-split_scale = 0.95  # train/test scale
-X_train, X_test, Y_train, Y_test = prepare_data(stock_data, lookback,
-                                                split_scale)
-train_dataset = TimeSeriesDataset(X_train, Y_train)
-test_dataset = TimeSeriesDataset(X_test, Y_test)
-
-batch_size = 50
-
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
-
 class LSTM(nn.Module):
 
-  def __init__(self, input_size, hidden_size, num_stacked_layers):
+  def __init__(self, input_size: int, hidden_size: int,
+               num_stacked_layers: int, output_size: int, device: str):
     super().__init__()
     self.hidden_size = hidden_size
     self.num_stacked_layers = num_stacked_layers
@@ -90,103 +35,161 @@ class LSTM(nn.Module):
                         num_stacked_layers,
                         batch_first=True)
 
-    self.fc = nn.Linear(hidden_size, n_tickers)
+    self.fc = nn.Linear(hidden_size, output_size)
+    self.device = device
 
   def forward(self, x):
     batch_size = x.size(0)
     h0 = torch.zeros(self.num_stacked_layers, batch_size,
-                     self.hidden_size).to(device)
+                     self.hidden_size).to(self.device)
     c0 = torch.zeros(self.num_stacked_layers, batch_size,
-                     self.hidden_size).to(device)
+                     self.hidden_size).to(self.device)
 
     out, _ = self.lstm(x, (h0, c0))
     out = self.fc(out[:, -1, :])
     return out
 
 
-model = LSTM(n_tickers, 5, 2)
-model.to(device)
-learning_rate = 0.0001
-num_epochs = 1500
-loss_function = nn.MSELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+class LSTMForecast(object):
 
+  def __init__(self,
+               tickers: List[str],
+               lookback: int = 7,
+               forward: int = 1,
+               batch_size: int = 50,
+               n_nodes: int = 5,
+               n_stack_layers: int = 1,
+               learning_rate: float = 0.0001,
+               n_epochs: int = 1500):
+    '''
+    lookback: number of observations required to predict future values.
+    forward: predict after "forward" steps.
+    batch_size: size of each batch.
+    n_nodes: number of nodes in hidden layer.
+    n_stack_layers: number of stack layers.
+    learning_rate: learning rate.
+    n_epochs: number of epochs.
+    '''
+    # init data
+    self.tickers = tickers
+    self.stock_data = yf.download(" ".join(tickers), period="5y")
+    self.n_tickers = len(tickers)
 
-def train_one_epoch():
-  model.train(True)
-  # print(f'Epoch: {epoch + 1}')
-  running_loss = 0.0
+    # init device
+    self.device = 'mps:0' if torch.backends.mps.is_available(
+    ) else 'cuda' if torch.cuda.is_available() else 'cpu'
 
-  for batch_index, batch in enumerate(train_loader):
-    x_batch, y_batch = batch[0].to(device), batch[1].to(device)
+    # init hyper parameters
+    self.lookback = lookback
+    self.forward = forward
+    self.batch_size = batch_size
+    self.n_nodes = n_nodes
+    self.n_stack_layers = n_stack_layers
+    self.n_epochs = n_epochs
 
-    output = model(x_batch)
-    loss = loss_function(output, y_batch)
-    running_loss += loss.item()
+    # init model
+    self.model = LSTM(self.n_tickers, 5, 2, self.n_tickers, self.device)
+    self.model.to(self.device)
+    self.loss_function = nn.MSELoss()
+    self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
 
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
+  def _prepare_data(self):
+    '''
+    convert data frame to returns matrix with shape (n_steps x lookback x n_tickers)
+    '''
+    self.stock_data.dropna(inplace=True)
+    close_prices = self.stock_data["Close"].to_numpy()
+    returns = (close_prices[1:] - close_prices[:-1]) / close_prices[:-1]
+    returns = np.append(np.zeros((1, returns.shape[1])), returns, axis=0)
+    n_tickers = returns.shape[1]
+    n_steps = returns.shape[0] - self.lookback + 1
 
-    if batch_index % 100 == 99:  # print every 100 batches
-      avg_loss_across_batches = running_loss / 100
-      print('Batch {0}, Loss: {1:.3f}'.format(batch_index + 1,
-                                              avg_loss_across_batches))
-      running_loss = 0.0
+    shifted_returns = np.zeros((n_steps, self.lookback, n_tickers))
+    for i in range(0, n_steps):
+      shifted_returns[i] = returns[i:i + self.lookback, :]
+    shifted_returns = np.float32(shifted_returns)
 
+    X = shifted_returns[:, :-1, :]
+    Y = shifted_returns[:, -1, :]
+    return X, Y
 
-def validate_one_epoch():
-  model.train(False)
-  running_loss = 0.0
+  def _train_one_epoch(self, loader):
+    self.model.train(True)
+    running_loss = 0.0
 
-  for batch_index, batch in enumerate(test_loader):
-    x_batch, y_batch = batch[0].to(device), batch[1].to(device)
+    for batch_index, batch in enumerate(loader):
+      x_batch, y_batch = batch[0].to(self.device), batch[1].to(self.device)
 
-    with torch.no_grad():
-      output = model(x_batch)
-      loss = loss_function(output, y_batch)
+      output = self.model(x_batch)
+      loss = self.loss_function(output, y_batch)
       running_loss += loss.item()
 
-  avg_loss_across_batches = running_loss / len(test_loader)
-  return avg_loss_across_batches
+      self.optimizer.zero_grad()
+      loss.backward()
+      self.optimizer.step()
 
-  # print('Val Loss: {0:.3f}'.format(avg_loss_across_batches))
-  # print('***************************************************')
-  # print()
+      if batch_index % 100 == 99:  # print every 100 batches
+        avg_loss_across_batches = running_loss / 100
+        print('Batch {0}, Loss: {1:.3f}'.format(batch_index + 1,
+                                                avg_loss_across_batches))
+        running_loss = 0.0
 
+  def _validate_one_epoch(self, loader):
+    self.model.train(False)
+    running_loss = 0.0
 
-for epoch in range(num_epochs):
-  train_one_epoch()
-  avg_loss = validate_one_epoch()
-  if epoch % 100 == 0:
-    print('Val Loss of epoch {0}: {1:.3f}'.format(epoch, avg_loss))
-    print('***************************************************')
-    print()
+    for _, batch in enumerate(loader):
+      x_batch, y_batch = batch[0].to(self.device), batch[1].to(self.device)
 
-with torch.no_grad():
-  predicted = model(torch.from_numpy(X_train).to(device)).to('cpu').numpy()
+      with torch.no_grad():
+        output = self.model(x_batch)
+        loss = self.loss_function(output, y_batch)
+        running_loss += loss.item()
 
+    avg_loss_across_batches = running_loss / len(loader)
+    return avg_loss_across_batches
 
-def calculate_prices_from_predicted_returns(initial_prices, returns):
-  stock_prices = [initial_prices[0]]
+  def train(self):
+    X_train, Y_train = self._prepare_data()
+    train_dataset = TimeSeriesDataset(X_train, Y_train)
+    train_loader = DataLoader(train_dataset,
+                              batch_size=self.batch_size,
+                              shuffle=True)
 
-  for i in range(1, len(returns)):
-    next_price = initial_prices[i - 1] * (1 + returns[i])
-    stock_prices.append(next_price)
+    for epoch in range(self.n_epochs):
+      self._train_one_epoch(train_loader)
+      avg_loss = self._validate_one_epoch(train_loader)
+      if epoch % 100 == 0:
+        print('Val Loss of epoch {0}: {1:.3f}'.format(epoch, avg_loss))
+        print('***************************************************')
+        print()
 
-  return stock_prices
+  def predict_1step_ahead(self, data: pd.DataFrame):
+    pass
+    # with torch.no_grad():
+    #   predicted = self.model(torch.from_numpy(X_train).to(self.device)).to('cpu').numpy()
 
+  def _pred_returns_to_pred_prices(self, initial_prices, returns):
+    stock_prices = [initial_prices[0]]
 
-# plt.plot(Y_train.T[0], label=f'Actual Close {tickers[0]}')
-# plt.plot(predicted.T[0], label=f'Predicted Close {tickers[0]}')
-ticker_index = 1
-S_0 = stock_data['Close'][tickers[ticker_index]].to_numpy()[-1]
-S = stock_data['Close'][tickers[ticker_index]].to_numpy()[lookback - 1:]
-plt.plot(S, label=f'Actual Close {tickers[0]}')
-plt.plot(calculate_prices_from_predicted_returns(S, predicted.T[ticker_index]),
-         label=f'Predicted Close {tickers[0]}')
-plt.legend()
-plt.show()
+    for i in range(1, len(returns)):
+      next_price = initial_prices[i - 1] * (1 + returns[i])
+      stock_prices.append(next_price)
 
+    return stock_prices
 
-
+  def plot_train_result(self, ticker_index=0):
+    '''
+    plot actual prices and predicted prices of a ticker in ticker list.
+    '''
+    ticker = self.tickers[ticker_index]
+    S = self.stock_data['Close'][ticker].to_numpy()[self.lookback - 1:]
+    X_train, _ = self._prepare_data()
+    with torch.no_grad():
+      predicted = self.model(torch.from_numpy(X_train).to(
+          self.device)).to('cpu').numpy()
+    plt.plot(S, label=f'Actual Close {ticker}')
+    plt.plot(self._pred_returns_to_pred_prices(S, predicted.T[ticker_index]),
+             label=f'Predicted Close {ticker}')
+    plt.legend()
+    plt.show()
