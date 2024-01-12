@@ -91,7 +91,8 @@ class LSTMForecast(object):
     self.model = LSTM(self.n_tickers, 5, 2, self.n_tickers, self.device)
     self.model.to(self.device)
     self.loss_function = nn.MSELoss()
-    self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
+    self.optimizer = torch.optim.Adam(self.model.parameters(),
+                                      lr=learning_rate)
 
   def _prepare_data(self):
     '''
@@ -102,15 +103,17 @@ class LSTMForecast(object):
     returns = (close_prices[1:] - close_prices[:-1]) / close_prices[:-1]
     returns = np.append(np.zeros((1, returns.shape[1])), returns, axis=0)
     n_tickers = returns.shape[1]
-    n_steps = returns.shape[0] - self.lookback + 1
+    n_interval = self.lookback + self.forward
+    n_steps = returns.shape[0] - n_interval + 1
 
-    shifted_returns = np.zeros((n_steps, self.lookback, n_tickers))
+    X = np.zeros((n_steps, self.lookback, n_tickers))
+    Y = np.zeros((n_steps, n_tickers))
     for i in range(0, n_steps):
-      shifted_returns[i] = returns[i:i + self.lookback, :]
-    shifted_returns = np.float32(shifted_returns)
+      X[i] = returns[i:i + self.lookback, :]
+      Y[i] = returns[i + n_interval - 1]
+    X = np.float32(X)
+    Y = np.float32(Y)
 
-    X = shifted_returns[:, :-1, :]
-    Y = shifted_returns[:, -1, :]
     return X, Y
 
   def _train_one_epoch(self, loader):
