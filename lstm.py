@@ -167,10 +167,17 @@ class LSTMForecast(object):
         print('***************************************************')
         print()
 
-  def predict_1step_ahead(self, data: pd.DataFrame):
-    pass
-    # with torch.no_grad():
-    #   predicted = self.model(torch.from_numpy(X_train).to(self.device)).to('cpu').numpy()
+  def predict_1step_ahead(self):
+    close_prices = self.stock_data["Close"].to_numpy()
+    returns = (close_prices[1:] - close_prices[:-1]) / close_prices[:-1]
+    X = np.zeros((1, self.lookback, self.n_tickers))
+    X[0] = returns[-self.lookback:, :]
+    X = np.float32(X)
+    with torch.no_grad():
+      predicted = self.model(torch.from_numpy(X).to(
+          self.device)).to('cpu').numpy()
+
+    return predicted
 
   def _pred_returns_to_pred_prices(self, initial_prices, returns):
     stock_prices = [initial_prices[0]]
