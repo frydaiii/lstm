@@ -7,6 +7,7 @@ from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from torch import nn
 from typing import List
+from utils import df2returns
 
 
 class TimeSeriesDataset(Dataset):
@@ -54,6 +55,7 @@ class LSTMForecast(object):
 
   def __init__(self,
                tickers: List[str],
+               stock_data: pd.DataFrame,
                lookback: int = 7,
                forward: int = 1,
                batch_size: int = 50,
@@ -72,7 +74,7 @@ class LSTMForecast(object):
     '''
     # init data
     self.tickers = tickers
-    self.stock_data = yf.download(" ".join(tickers), period="5y")
+    self.stock_data = stock_data
     self.n_tickers = len(tickers)
 
     # init device
@@ -98,10 +100,7 @@ class LSTMForecast(object):
     '''
     convert data frame to returns matrix with shape (n_steps x lookback x n_tickers)
     '''
-    self.stock_data.dropna(inplace=True)
-    close_prices = self.stock_data["Close"].to_numpy()
-    returns = (close_prices[1:] - close_prices[:-1]) / close_prices[:-1]
-    returns = np.append(np.zeros((1, returns.shape[1])), returns, axis=0)
+    returns = df2returns(self.stock_data)
     n_tickers = returns.shape[1]
     n_interval = self.lookback + self.forward
     n_steps = returns.shape[0] - n_interval + 1
@@ -168,8 +167,7 @@ class LSTMForecast(object):
         print()
 
   def predict_1step_ahead(self):
-    close_prices = self.stock_data["Close"].to_numpy()
-    returns = (close_prices[1:] - close_prices[:-1]) / close_prices[:-1]
+    returns = df2returns(self.stock_data)
     X = np.zeros((1, self.lookback, self.n_tickers))
     X[0] = returns[-self.lookback:, :]
     X = np.float32(X)
