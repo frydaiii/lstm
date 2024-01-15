@@ -7,12 +7,12 @@ def mean_portfolio(weights: np.ndarray, *args):
   return np.dot(mu.T, weights)
 
 
-def portfolio_optimize_fun(weights: np.ndarray, *args):
-  return -mean_portfolio(weights, *args)
-
-
 def std_portfolio(weights: np.ndarray, cov: np.ndarray):
   return np.sqrt(np.dot(weights.T, np.dot(cov, weights)))
+
+
+def portfolio_optimize_fun(weights: np.ndarray, *args):
+  return -mean_portfolio(weights, *args)
 
 
 def risk_constraint(weights: np.ndarray, risk: float, cov: np.ndarray):
@@ -28,6 +28,7 @@ def optimize(mu: np.ndarray,
     raise ValueError("mean is not a 1-d array")
   if cov.ndim != 2:
     raise ValueError("cov is not a matrix")
+
   bounds = tuple((lower, upper) for _ in mu)
   init_w = np.ones(len(mu)) / len(mu)
   constraints = ({

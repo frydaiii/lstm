@@ -5,6 +5,12 @@ import numpy as np
 import pypfopt as ppf
 import yfinance as yf
 import pandas as pd
+import torch
+import random
+
+np.random.seed(0)
+torch.manual_seed(0)
+random.seed(0)
 
 tickers = [
     "AAPL", "ABBV", "ABT", "ACN", "ADBE", "AIG", "ALL", "AMGN", "AMT", "AMZN",
@@ -25,7 +31,7 @@ tickers.sort()
 #     "CL", "CMCSA", "COF", "COP", "COST", "CRM", "CSCO", "CVS", "CVX", "DD",
 #     "DHR", "DIS", "DUK", "EMR", "EXC", "F", "FDX", "GD", "GE", "GILD", "GM",
 # ]
-forward = 1  # test result after 'forward' days
+forward = 7  # test result after 'forward' days
 stock_data = yf.download(tickers, period="5y")
 stock_data.dropna(how="all", inplace=True)
 train_data = stock_data.iloc[:-forward]
@@ -37,7 +43,8 @@ lstm = LSTMForecast(tickers,
                     forward=forward,
                     n_nodes=50,
                     n_stack_layers=2,
-                    learning_rate=0.0005)
+                    learning_rate=0.0001,
+                    n_epochs=2000)
 lstm.train()
 
 mu_1 = pd.Series(lstm.predict_1step_ahead()[0] * 252 / forward, index=tickers)
@@ -57,7 +64,7 @@ for i in range(0, len(risks)):
   # mvopt1.efficient_risk(target_volatility=risks[i])
   # weights_1 = mvopt1.clean_weights()
   weights_1 = pd.Series((optimize(mu_1.to_numpy(), cov.to_numpy(), risks[i])),
-      index=tickers)
+                        index=tickers)
   # mvopt2.efficient_risk(target_volatility=risks[i])
   # weights_2 = mvopt2.clean_weights()
 
