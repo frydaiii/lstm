@@ -8,9 +8,9 @@ import pandas as pd
 import torch
 import random
 
-np.random.seed(0)
-torch.manual_seed(0)
-random.seed(0)
+# np.random.seed(0)
+# torch.manual_seed(0)
+# random.seed(0)
 
 tickers = [
     "AAPL", "ABBV", "ABT", "ACN", "ADBE", "AIG", "ALL", "AMGN", "AMT", "AMZN",
@@ -25,7 +25,7 @@ tickers = [
     "V", "VZ", "WBA", "WFC", "WM", "WMT", "XOM"
 ]
 tickers.sort()
-forward = 4  # test result after 'forward' days
+forward = 1  # test result after 'forward' days
 stock_data = yf.download(tickers, period="5y")
 stock_data.dropna(how="all", inplace=True)
 train_data = stock_data.iloc[:-forward]
@@ -42,7 +42,8 @@ lstm = LSTMForecast(tickers,
 lstm.train()
 
 mu_1 = pd.Series(lstm.predict_1step_ahead()[0] * 252 / forward, index=tickers)
-mu_2 = ppf.expected_returns.capm_return(train_data["Close"])
+mu_2 = ppf.expected_returns.capm_return(train_data["Close"],
+                                        risk_free_rate=0.05)
 
 # validate if ticker index is not match
 for i in range(0, len(tickers)):
