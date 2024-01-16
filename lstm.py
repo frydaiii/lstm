@@ -191,13 +191,12 @@ class LSTMForecast(object):
     plot actual prices and predicted prices of a ticker in ticker list.
     '''
     ticker = self.tickers[ticker_index]
-    S = self.stock_data['Close'][ticker].to_numpy()[self.lookback - 1:]
+    _, S = self._prepare_data()
     X_train, _ = self._prepare_data()
     with torch.no_grad():
       predicted = self.model(torch.from_numpy(X_train).to(
           self.device)).to('cpu').numpy()
-    plt.plot(S, label=f'Actual Close {ticker}')
-    plt.plot(self._pred_returns_to_pred_prices(S, predicted.T[ticker_index]),
-             label=f'Predicted Close {ticker}')
+    plt.plot(S[:, ticker_index], label=f'Actual Returns {ticker}')
+    plt.plot(predicted[:, ticker_index], label=f'Predicted Returns {ticker}')
     plt.legend()
     plt.show()
