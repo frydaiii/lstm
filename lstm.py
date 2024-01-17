@@ -27,8 +27,7 @@ class TimeSeriesDataset(Dataset):
 
 class LSTM(nn.Module):
 
-  def __init__(self, hidden_size: int,
-               num_stacked_layers: int, device: str):
+  def __init__(self, hidden_size: int, num_stacked_layers: int, device: str):
     super().__init__()
     self.hidden_size = hidden_size
     self.num_stacked_layers = num_stacked_layers
@@ -36,7 +35,8 @@ class LSTM(nn.Module):
     self.lstm = nn.LSTM(1,
                         hidden_size,
                         num_stacked_layers,
-                        batch_first=True)
+                        batch_first=True,
+                        dropout=0.2)
 
     self.fc = nn.Linear(hidden_size, 1)
     self.device = device
@@ -87,8 +87,7 @@ class LSTMForecast(object):
     self.stock_data = stock_data
 
     # init device
-    self.device = 'mps:0' if torch.backends.mps.is_available(
-    ) else 'cuda' if torch.cuda.is_available() else 'cpu'
+    self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     # init hyper parameters
     self.lookback = lookback
@@ -189,15 +188,17 @@ class LSTMForecast(object):
     Predict 1-step ahead.
     '''
     prices = self.stock_data["Close"].to_numpy()
-    X = np.zeros((1, self.lookback, self.n_tickers))
-    X[0] = prices[-self.lookback:, :]
-    X = np.float32(X)
+    last_prices = prices[-1]
+    X = np.zeros((1, self.lookback, 1))
+    X[0] = prices[-self.lookback:].reshape(-1, 1)
+    X = torch.tensor(X).float()
     with torch.no_grad():
-      predicted = self.model(torch.from_numpy(X).to(
-          self.device)).to('cpu').numpy()
+      predicted = self.model(X.to(self.device)).to('cpu').numpy()
 
-    last_prices = X[-1]
-    return predicted / last_prices - 1
+    if predicted.size == 1:
+      return self.scale_normal(predicted)[0] / last_prices - 1
+    else:
+      raise ValueError("Invalid predict value")
 
   def plot_train_result(self):
     '''

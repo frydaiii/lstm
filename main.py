@@ -7,6 +7,7 @@ import yfinance as yf
 import pandas as pd
 import torch
 import random
+import json
 
 # np.random.seed(0)
 # torch.manual_seed(0)
@@ -25,64 +26,81 @@ tickers = [
     "V", "VZ", "WBA", "WFC", "WM", "WMT", "XOM"
 ]
 tickers.sort()
-stock_data = yf.download(tickers[0], period="5y")
-stock_data.dropna(how="all", inplace=True)
+
+# LSTM returns
+returns = {}
+print(f"Forecasting returns...")
+for ticker in tickers:
+  stock_data = yf.download(ticker, period="15y")
+  stock_data.dropna(how="all", inplace=True)
+  train_data = stock_data.iloc[:-1]
+
+  lstm = LSTMForecast(ticker,
+                      train_data,
+                      lookback=6,
+                      batch_size=64,
+                      n_nodes=5,
+                      n_stack_layers=5,
+                      learning_rate=0.001,
+                      n_epochs=150)
+  lstm.train()
+  returns[ticker] = lstm.predict()
+  print("{0}: {1:.4f}".format(ticker, returns[ticker]))
+  # lstm.plot_train_result()
+  break
+print()
+
+file = open('returns.txt', 'w')
+file.write(json.dumps(returns))
+file.close()
+
+mu_1 = pd.Series(returns)
+
+# CAPM returns
+stock_data = yf.download(tickers, period="15y")
 train_data = stock_data.iloc[:-1]
-test_prices = stock_data.iloc[-1]
+mu_2 = ppf.expected_returns.capm_return(train_data["Close"],
+                                        risk_free_rate=0.05)
 
-lstm = LSTMForecast(tickers[0],
-                    train_data,
-                    lookback=7,
-                    batch_size=16,
-                    n_nodes=5,
-                    n_stack_layers=1,
-                    learning_rate=0.001,
-                    n_epochs=20)
-lstm.train()
-lstm.plot_train_result()
+# validate if ticker index is not match
+for i in range(0, len(tickers)):
+  if tickers[i] != mu_2.index[i]:
+    raise ValueError("ticker index not match")
 
-# mu_1 = pd.Series(lstm.predict_1step_ahead()[0] * 252 / forward, index=tickers)
-# mu_2 = ppf.expected_returns.capm_return(train_data["Close"],
-#                                         risk_free_rate=0.05)
+cov = ppf.risk_models.CovarianceShrinkage(train_data["Close"]).ledoit_wolf()
+global_min_volatility = np.sqrt(1 / np.sum(np.linalg.pinv(cov)))
+risks = np.arange(global_min_volatility + 0.01, 1, 0.01)
+property_1_test = np.zeros(len(risks))
+property_2_test = np.zeros(len(risks))
+init_money = 1000
 
-# # validate if ticker index is not match
-# for i in range(0, len(tickers)):
-#   if tickers[i] != mu_2.index[i]:
-#     raise ValueError("ticker index not match")
+print("Optimizing money allocation...")
+for i in range(0, len(risks)):
+  weights_1 = pd.Series((optimize(mu_1.to_numpy(), cov.to_numpy(), risks[i])),
+                        index=tickers)
+  weights_2 = pd.Series((optimize(mu_2.to_numpy(), cov.to_numpy(), risks[i])),
+                        index=tickers)
 
-# cov = ppf.risk_models.CovarianceShrinkage(train_data["Close"]).ledoit_wolf()
-# global_min_volatility = np.sqrt(1 / np.sum(np.linalg.pinv(cov)))
-# risks = np.arange(global_min_volatility + 0.01, 1, 0.01)
-# property_1_test = np.zeros(len(risks))
-# property_2_test = np.zeros(len(risks))
-# init_money = 1000
+  property_1_before = 0
+  property_2_before = 0
+  last_price = train_data.iloc[-1]
+  for ticker in tickers:
+    property_1_before += last_price["Close"][ticker] * weights_1[ticker]
+    property_2_before += last_price["Close"][ticker] * weights_2[ticker]
 
-# print("Optimizing money allocation...")
-# for i in range(0, len(risks)):
-#   weights_1 = pd.Series((optimize(mu_1.to_numpy(), cov.to_numpy(), risks[i])),
-#                         index=tickers)
-#   weights_2 = pd.Series((optimize(mu_2.to_numpy(), cov.to_numpy(), risks[i])),
-#                         index=tickers)
+  # normalize
+  for ticker in tickers:
+    weights_1[ticker] *= init_money / property_1_before
+    weights_2[ticker] *= init_money / property_2_before
 
-#   property_1_before = 0
-#   property_2_before = 0
-#   last_price = train_data.iloc[-1]
-#   for ticker in tickers:
-#     property_1_before += last_price["Close"][ticker] * weights_1[ticker]
-#     property_2_before += last_price["Close"][ticker] * weights_2[ticker]
+  property_1_test[i] = 0
+  property_2_test[i] = 0
+  test_prices = stock_data.iloc[-1]
+  for ticker in tickers:
+    property_1_test[i] += test_prices["Close"][ticker] * weights_1[ticker]
+    property_2_test[i] += test_prices["Close"][ticker] * weights_2[ticker]
 
-#   # normalize
-#   for ticker in tickers:
-#     weights_1[ticker] *= init_money / property_1_before
-#     weights_2[ticker] *= init_money / property_2_before
-
-#   property_1_test[i] = 0
-#   property_2_test[i] = 0
-#   for ticker in tickers:
-#     property_1_test[i] += test_prices["Close"][ticker] * weights_1[ticker]
-#     property_2_test[i] += test_prices["Close"][ticker] * weights_2[ticker]
-
-# plt.plot(risks, property_1_test, label="LSTM optimization")
-# plt.plot(risks, property_2_test, label="Static optimization")
-# plt.legend()
-# plt.show()
+plt.plot(risks, property_1_test, label="LSTM optimization")
+plt.plot(risks, property_2_test, label="Static optimization")
+plt.legend()
+plt.show()
