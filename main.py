@@ -25,22 +25,21 @@ tickers = [
     "V", "VZ", "WBA", "WFC", "WM", "WMT", "XOM"
 ]
 tickers.sort()
-forward = 1  # test result after 'forward' days
-stock_data = yf.download(tickers, period="5y")
+stock_data = yf.download(tickers[0], period="5y")
 stock_data.dropna(how="all", inplace=True)
-train_data = stock_data.iloc[:-forward]
+train_data = stock_data.iloc[:-1]
 test_prices = stock_data.iloc[-1]
 
-lstm = LSTMForecast(tickers,
+lstm = LSTMForecast(tickers[0],
                     train_data,
-                    lookback=3,
-                    forward=forward,
-                    n_nodes=40,
-                    n_stack_layers=2,
-                    learning_rate=0.00001,
-                    n_epochs=3000)
+                    lookback=7,
+                    batch_size=16,
+                    n_nodes=5,
+                    n_stack_layers=1,
+                    learning_rate=0.001,
+                    n_epochs=20)
 lstm.train()
-lstm.plot_train_result(0)
+lstm.plot_train_result()
 
 # mu_1 = pd.Series(lstm.predict_1step_ahead()[0] * 252 / forward, index=tickers)
 # mu_2 = ppf.expected_returns.capm_return(train_data["Close"],
