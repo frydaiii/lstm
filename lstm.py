@@ -7,6 +7,7 @@ from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from torch import nn
 from typing import List
+from sklearn.preprocessing import MinMaxScaler
 from utils import df2returns
 
 
@@ -42,13 +43,21 @@ class LSTM(nn.Module):
   def forward(self, x):
     batch_size = x.size(0)
     h0 = torch.zeros(self.num_stacked_layers, batch_size,
-                     self.hidden_size).to(self.device)
+                      self.hidden_size).to(self.device)
     c0 = torch.zeros(self.num_stacked_layers, batch_size,
-                     self.hidden_size).to(self.device)
+                      self.hidden_size).to(self.device)
 
     out, _ = self.lstm(x, (h0, c0))
     out = self.fc(out[:, -1, :])
     return out
+  # def forward(self, x):
+  #   h0 = torch.zeros(self.num_stacked_layers, x.size(0),
+  #                     self.hidden_size).requires_grad_()
+  #   c0 = torch.zeros(self.num_stacked_layers, x.size(0),
+  #                     self.hidden_size).requires_grad_()
+  #   out, (hn, cn) = self.lstm(x, (h0.detach(), c0.detach()))
+  #   out = self.fc(out[:, -1, :])
+  #   return out
 
 
 class LSTMForecast(object):
@@ -85,33 +94,41 @@ class LSTMForecast(object):
     self.lookback = lookback
     self.forward = forward
     self.batch_size = batch_size
-    self.n_nodes = n_nodes
-    self.n_stack_layers = n_stack_layers
     self.n_epochs = n_epochs
 
     # init model
-    self.model = LSTM(self.n_tickers, 5, 2, self.n_tickers, self.device)
+    self.model = LSTM(self.n_tickers, n_nodes, n_stack_layers, self.n_tickers, self.device)
     self.model.to(self.device)
     self.loss_function = nn.MSELoss()
     self.optimizer = torch.optim.Adam(self.model.parameters(),
                                       lr=learning_rate)
 
   def _prepare_data(self):
-    '''
-    convert data frame to returns matrix with shape (n_steps x lookback x n_tickers)
-    '''
-    returns = df2returns(self.stock_data)
-    n_tickers = returns.shape[1]
+    prices = self.stock_data["Close"].to_numpy()
+    n_tickers = prices.shape[1]
     n_interval = self.lookback + self.forward
-    n_steps = returns.shape[0] - n_interval + 1
+    n_steps = prices.shape[0] - n_interval + 1
 
     X = np.zeros((n_steps, self.lookback, n_tickers))
     Y = np.zeros((n_steps, n_tickers))
     for i in range(0, n_steps):
-      X[i] = returns[i:i + self.lookback, :]
-      Y[i] = returns[i + n_interval - 1]
+      X[i] = prices[i:i + self.lookback, :]
+      Y[i] = prices[i + n_interval - 1]
     X = np.float32(X)
     Y = np.float32(Y)
+
+    # scale input
+    scalers = {}
+    for i in range(0, n_tickers):
+      scalers[i] = MinMaxScaler(feature_range=(-1, 1))
+      X[:, :, i] = scalers[i].fit_transform(X[:, :, i])
+    # The target values are 2D arrays, which is easy to scale
+    scalerY = MinMaxScaler(feature_range=(-1, 1))
+    Y = scalerY.fit_transform(Y)
+
+    # # flatten input
+    # n_input = X.shape[1] * X.shape[2]
+    # X = X.reshape((X.shape[0], n_input, 1))
 
     return X, Y
 
@@ -167,15 +184,17 @@ class LSTMForecast(object):
         print()
 
   def predict_1step_ahead(self):
-    returns = df2returns(self.stock_data)
+    # _todo rescale from (-1,1)
+    prices = self.stock_data["Close"].to_numpy()
     X = np.zeros((1, self.lookback, self.n_tickers))
-    X[0] = returns[-self.lookback:, :]
+    X[0] = prices[-self.lookback:, :]
     X = np.float32(X)
     with torch.no_grad():
       predicted = self.model(torch.from_numpy(X).to(
           self.device)).to('cpu').numpy()
 
-    return predicted
+    last_prices = X[-1]
+    return predicted / last_prices - 1
 
   def _pred_returns_to_pred_prices(self, initial_prices, returns):
     stock_prices = [initial_prices[0]]
@@ -191,12 +210,11 @@ class LSTMForecast(object):
     plot actual prices and predicted prices of a ticker in ticker list.
     '''
     ticker = self.tickers[ticker_index]
-    _, S = self._prepare_data()
-    X_train, _ = self._prepare_data()
+    X, Y = self._prepare_data()
     with torch.no_grad():
-      predicted = self.model(torch.from_numpy(X_train).to(
+      predicted = self.model(torch.from_numpy(X).to(
           self.device)).to('cpu').numpy()
-    plt.plot(S[:, ticker_index], label=f'Actual Returns {ticker}')
+    plt.plot(Y[:, ticker_index], label=f'Actual Returns {ticker}')
     plt.plot(predicted[:, ticker_index], label=f'Predicted Returns {ticker}')
     plt.legend()
     plt.show()
