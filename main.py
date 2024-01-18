@@ -15,7 +15,7 @@ import json
 # random.seed(0)
 
 tickers = [
-    "AAPL", "ABBV", "ABT", "ACN", "ADBE", "AIG", "ALL", "AMGN", "AMT", "AMZN",
+    "ABBV", "ABT", "ACN", "ADBE", "AIG", "ALL", "AMGN", "AMT", "AMZN",
     "AXP", "BA", "BAC", "BIIB", "BK", "BKNG", "BLK", "BMY", "C", "CAT", "CHTR",
     "CL", "CMCSA", "COF", "COP", "COST", "CRM", "CSCO", "CVS", "CVX", "DD",
     "DHR", "DIS", "DUK", "EMR", "EXC", "F", "FDX", "GD", "GE", "GILD", "GM",
@@ -33,7 +33,7 @@ returns = {}
 print(f"Forecasting returns...")
 file = open('returns.txt', 'a')
 for ticker in tickers:
-  stock_data = yf.download(ticker, period="20y")
+  stock_data = yf.download(ticker, period="15y")
   stock_data.dropna(how="all", inplace=True)
   train_data = stock_data.iloc[:-1]
 
