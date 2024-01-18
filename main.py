@@ -38,7 +38,7 @@ lstm = LSTMForecast(tickers,
                     n_nodes=5,
                     n_stack_layers=4,
                     learning_rate=0.0001,
-                    n_epochs=300)
+                    n_epochs=200)
 lstm.train()
 
 mu_1 = pd.Series(lstm.predict_1step_ahead()[0] * 252 / forward, index=tickers)
