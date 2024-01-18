@@ -17,7 +17,7 @@ class TimeSeriesDataset(Dataset):
     self.Y = Y
 
   def __len__(self):
-    return len(self.X[0])
+    return len(self.X)
 
   def __getitem__(self, i):
     return self.X[i], self.Y[i]
