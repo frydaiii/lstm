@@ -58,7 +58,7 @@ class LSTMForecast(object):
                stock_data: pd.DataFrame,
                lookback: int = 7,
                forward: int = 1,
-               batch_size: int = 50,
+               batch_size: int = 64,
                n_nodes: int = 5,
                n_stack_layers: int = 1,
                learning_rate: float = 0.0001,

@@ -26,7 +26,7 @@ tickers = [
 ]
 tickers.sort()
 forward = 1  # test result after 'forward' days
-stock_data = yf.download(tickers, period="5y")
+stock_data = yf.download(tickers, period="15y")
 stock_data.dropna(how="all", inplace=True)
 train_data = stock_data.iloc[:-forward]
 test_prices = stock_data.iloc[-1]
@@ -35,8 +35,8 @@ lstm = LSTMForecast(tickers,
                     train_data,
                     lookback=10,
                     forward=forward,
-                    n_nodes=40,
-                    n_stack_layers=2,
+                    n_nodes=5,
+                    n_stack_layers=4,
                     learning_rate=0.0001,
                     n_epochs=300)
 lstm.train()
