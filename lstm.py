@@ -25,6 +25,25 @@ class TimeSeriesDataset(Dataset):
     return self.X[i], self.Y[i]
 
 
+class EarlyStopper:
+
+  def __init__(self, patience=1, min_delta=0):
+    self.patience = patience
+    self.min_delta = min_delta
+    self.counter = 0
+    self.min_validation_loss = float('inf')
+
+  def early_stop(self, validation_loss):
+    if validation_loss < self.min_validation_loss:
+      self.min_validation_loss = validation_loss
+      self.counter = 0
+    elif validation_loss > (self.min_validation_loss + self.min_delta):
+      self.counter += 1
+      if self.counter >= self.patience:
+        return True
+    return False
+
+
 class LSTM(nn.Module):
 
   def __init__(self, hidden_size: int, num_stacked_layers: int, device: str):
@@ -51,15 +70,6 @@ class LSTM(nn.Module):
     out, _ = self.lstm(x, (h0, c0))
     out = self.fc(out[:, -1, :])
     return out
-
-  # def forward(self, x):
-  #   h0 = torch.zeros(self.num_stacked_layers, x.size(0),
-  #                     self.hidden_size).requires_grad_()
-  #   c0 = torch.zeros(self.num_stacked_layers, x.size(0),
-  #                     self.hidden_size).requires_grad_()
-  #   out, (hn, cn) = self.lstm(x, (h0.detach(), c0.detach()))
-  #   out = self.fc(out[:, -1, :])
-  #   return out
 
 
 class LSTMForecast(object):
@@ -97,7 +107,7 @@ class LSTMForecast(object):
     # init model
     self.model = LSTM(n_nodes, n_stack_layers, self.device)
     self.model.to(self.device)
-    self.loss_function = nn.MSELoss()
+    self.loss_function = nn.L1Loss()
     self.optimizer = torch.optim.Adam(self.model.parameters(),
                                       lr=learning_rate)
 
@@ -162,13 +172,16 @@ class LSTMForecast(object):
                               batch_size=self.batch_size,
                               shuffle=True)
 
+    early_stopper = EarlyStopper(patience=50, min_delta=1e-3)
     for epoch in range(self.n_epochs):
       self._train_one_epoch(train_loader)
       avg_loss = self._validate_one_epoch(train_loader)
-      if epoch % 10 == 0:
+      if epoch % 100 == 0:
         print('Val Loss of epoch {0}: {1:.3f}'.format(epoch, avg_loss))
         print('***************************************************')
         print()
+      if early_stopper.early_stop(avg_loss):
+        break
 
   def scale_normal(self, data: np.ndarray):
     '''

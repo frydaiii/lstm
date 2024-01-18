@@ -30,6 +30,7 @@ tickers.sort()
 # LSTM returns
 returns = {}
 print(f"Forecasting returns...")
+file = open('returns.txt', 'a')
 for ticker in tickers:
   stock_data = yf.download(ticker, period="15y")
   stock_data.dropna(how="all", inplace=True)
@@ -37,21 +38,17 @@ for ticker in tickers:
 
   lstm = LSTMForecast(ticker,
                       train_data,
-                      lookback=6,
+                      lookback=10,
                       batch_size=64,
                       n_nodes=5,
-                      n_stack_layers=5,
-                      learning_rate=0.001,
-                      n_epochs=150)
+                      n_stack_layers=4,
+                      learning_rate=1e-3,
+                      n_epochs=2000)
   lstm.train()
   returns[ticker] = lstm.predict()
   print("{0}: {1:.4f}".format(ticker, returns[ticker]))
-  # lstm.plot_train_result()
-  break
+  file.write(ticker + ": " + str(returns[ticker]) + "\n")
 print()
-
-file = open('returns.txt', 'w')
-file.write(json.dumps(returns))
 file.close()
 
 mu_1 = pd.Series(returns)
