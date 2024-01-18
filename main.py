@@ -1,6 +1,7 @@
 from lstm import LSTMForecast
 from matplotlib import pyplot as plt
 from optimization import optimize
+from utils import read_returns, normalize_return
 import numpy as np
 import pypfopt as ppf
 import yfinance as yf
@@ -32,7 +33,7 @@ returns = {}
 print(f"Forecasting returns...")
 file = open('returns.txt', 'a')
 for ticker in tickers:
-  stock_data = yf.download(ticker, period="15y")
+  stock_data = yf.download(ticker, period="20y")
   stock_data.dropna(how="all", inplace=True)
   train_data = stock_data.iloc[:-1]
 
@@ -51,7 +52,9 @@ for ticker in tickers:
 print()
 file.close()
 
+returns = normalize_return(read_returns("returns.txt"))
 mu_1 = pd.Series(returns)
+
 
 # CAPM returns
 stock_data = yf.download(tickers, period="15y")
