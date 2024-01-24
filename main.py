@@ -45,7 +45,7 @@ for ticker in tickers:
                       train_data,
                       lookback=10,
                       batch_size=64,
-                      n_nodes=5,
+                      n_nodes=10,
                       n_stack_layers=4,
                       learning_rate=1e-3,
                       n_epochs=2000)
@@ -56,7 +56,7 @@ for ticker in tickers:
 print()
 file.close()
 
-returns = normalize_return(read_returns("returns.txt"))
+returns = normalize_return(read_returns("returns_.txt"))
 mu_1 = pd.Series(returns)
 
 
