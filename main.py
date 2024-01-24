@@ -1,6 +1,8 @@
 from lstm import LSTMForecast
 from matplotlib import pyplot as plt
 from optimization import optimize
+from utils import df2returns
+from datetime import datetime
 import numpy as np
 import pypfopt as ppf
 import yfinance as yf
@@ -26,10 +28,11 @@ tickers = [
 ]
 tickers.sort()
 forward = 1  # test result after 'forward' days
-stock_data = yf.download(tickers, period="15y")
+start = datetime.strptime("18-01-2009", "%d-%m-%Y")
+end = datetime.strptime("18-01-2024", "%d-%m-%Y")
+stock_data = yf.download(tickers, start=start, end=end)
 stock_data.dropna(how="all", inplace=True)
 train_data = stock_data.iloc[:-forward]
-test_prices = stock_data.iloc[-1]
 
 lstm = LSTMForecast(tickers,
                     train_data,
@@ -53,9 +56,8 @@ for i in range(0, len(tickers)):
 cov = ppf.risk_models.CovarianceShrinkage(train_data["Close"]).ledoit_wolf()
 global_min_volatility = np.sqrt(1 / np.sum(np.linalg.pinv(cov)))
 risks = np.arange(global_min_volatility + 0.01, 1, 0.01)
-property_1_test = np.zeros(len(risks))
-property_2_test = np.zeros(len(risks))
-init_money = 1000
+returns_portfolio_1 = np.zeros(len(risks))
+returns_portfolio_2 = np.zeros(len(risks))
 
 print("Optimizing money allocation...")
 for i in range(0, len(risks)):
@@ -64,25 +66,14 @@ for i in range(0, len(risks)):
   weights_2 = pd.Series((optimize(mu_2.to_numpy(), cov.to_numpy(), risks[i])),
                         index=tickers)
 
-  property_1_before = 0
-  property_2_before = 0
-  last_price = train_data.iloc[-1]
   for ticker in tickers:
-    property_1_before += last_price["Close"][ticker] * weights_1[ticker]
-    property_2_before += last_price["Close"][ticker] * weights_2[ticker]
+    a = stock_data["Close"][ticker].to_numpy()[-1]
+    b = stock_data["Close"][ticker].to_numpy()[-2]
+    returns = a / b - 1
+    returns_portfolio_1[i] += returns * weights_1[ticker]
+    returns_portfolio_2[i] += returns * weights_2[ticker]
 
-  # normalize
-  for ticker in tickers:
-    weights_1[ticker] *= init_money / property_1_before
-    weights_2[ticker] *= init_money / property_2_before
-
-  property_1_test[i] = 0
-  property_2_test[i] = 0
-  for ticker in tickers:
-    property_1_test[i] += test_prices["Close"][ticker] * weights_1[ticker]
-    property_2_test[i] += test_prices["Close"][ticker] * weights_2[ticker]
-
-plt.plot(risks, property_1_test, label="LSTM optimization")
-plt.plot(risks, property_2_test, label="Static optimization")
+plt.plot(risks, returns_portfolio_1, label="LSTM optimization")
+plt.plot(risks, returns_portfolio_2, label="Static optimization")
 plt.legend()
 plt.show()
